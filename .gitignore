@@ -1,0 +1,53 @@
+# -----------------------
+# Python
+# -----------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual Environment
+venv/
+
+# Environment Variables
+.env
+
+# Pytest
+.pytest_cache/
+
+# Coverage
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# SQLAlchemy
+*.db
+*.sqlite3
+
+# Alembic
+alembic/versions/__pycache__/
+
+# Python cache
+**/__pycache__/
+
+# Node
+node_modules/
+
+# React build
+dist/
+build/
+
+# Environment
+.env.*
+!.env.example
+# data
+data/
