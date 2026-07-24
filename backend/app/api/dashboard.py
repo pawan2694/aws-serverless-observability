@@ -2,7 +2,11 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.db.dependencies import get_db
-from app.schemas.dashboard import DashboardSummary, HighDurationResponse
+from app.schemas.dashboard import (
+    DashboardSummary,
+    HighDurationResponse,
+    HighMemoryResponse,
+)
 from app.services.dashboard_service import DashboardService
 
 router = APIRouter(
@@ -25,8 +29,19 @@ def dashboard_summary(
     "/high-duration",
     response_model=list[HighDurationResponse],
 )
+
 def high_duration(
     db: Session = Depends(get_db),
 ):
     service = DashboardService(db)
     return service.get_high_duration()
+
+@router.get(
+    "/high-memory",
+    response_model=list[HighMemoryResponse],
+)
+def high_memory(
+    db: Session = Depends(get_db),
+):
+    service = DashboardService(db)
+    return service.get_high_memory()

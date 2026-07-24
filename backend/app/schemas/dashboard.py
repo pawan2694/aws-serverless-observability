@@ -11,3 +11,8 @@ class HighDurationResponse(BaseModel):
     avg_duration: float
     memory_size: int
     timeout: int
+
+class HighMemoryResponse(BaseModel):
+    function_name: str
+    memory_size: int
+    timeout: int

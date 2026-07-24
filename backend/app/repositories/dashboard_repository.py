@@ -61,3 +61,19 @@ class DashboardRepository:
         )
 
         return result
+    def get_high_memory(self):
+
+        result = (
+            self.db.query(
+                LambdaFunction.function_name,
+                LambdaFunction.memory_size,
+                LambdaFunction.timeout,
+            )
+            .order_by(
+                LambdaFunction.memory_size.desc()
+            )
+            .limit(10)
+            .all()
+        )
+
+        return result

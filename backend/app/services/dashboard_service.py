@@ -11,3 +11,6 @@ class DashboardService:
 
     def get_high_duration(self):
         return self.repository.get_high_duration()
+    
+    def get_high_memory(self):
+        return self.repository.get_high_memory()
