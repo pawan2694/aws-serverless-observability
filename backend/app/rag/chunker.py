@@ -62,7 +62,7 @@ class TelemetryChunker:
             chunk_text = (
                 f"CloudWatch Metric: Function='{fn_name}', "
                 f"MetricName='{m.metric_name}', Value={m.metric_value} {m.unit or 'ms'}, "
-                f"Timestamp='{m.timestamp}'."
+                f"Timestamp='{m.metric_timestamp}'."
             )
             chunks.append({
                 "id": f"metric_{m.id}",

@@ -2,29 +2,69 @@
 RAG Generator & Prompt Augmenter.
 
 Yeh module retrieved context ko lekar final answer form karta hai.
-Current implementation simple rule-based generator hai; isko baad mein real LLM API ke saath replace kiya ja sakta hai.
+Agar local Ollama server available hai to yeh real LLM ka use karta hai,
+warna safe fallback ke saath rule-based answer return karta hai.
 """
 
+import json
 from typing import List, Dict, Any
+from urllib import error, request
+
+from app.core.config import settings
+
+
+class OllamaClient:
+    """Lightweight local Ollama client for free LLM inference."""
+
+    def __init__(self, base_url: str | None = None, model: str | None = None):
+        self.base_url = (base_url or settings.OLLAMA_BASE_URL).rstrip("/")
+        self.model = model or settings.OLLAMA_MODEL
+
+    def generate(self, prompt: str) -> str:
+        """Call local Ollama /api/generate and return the model response."""
+        payload = {
+            "model": self.model,
+            "prompt": prompt,
+            "stream": False,
+        }
+        req = request.Request(
+            f"{self.base_url}/api/generate",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        with request.urlopen(req, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+            return (payload.get("response") or "").strip()
 
 
 class RagGenerator:
     """Retrieved context ke hisaab se structured answer generate karta hai."""
 
-    def generate_response(self, query: str, search_results: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Top-k retrieved chunks ko lekar response payload banata hai.
+    def __init__(self, ollama_client: OllamaClient | None = None):
+        self.ollama_client = ollama_client or OllamaClient()
 
-        Yeh step ko "prompt augmentation" kah sakte hain, kyunki answer ko retrieved data ke
-        saath enrich kiya jata hai. Is implementation mein actual LLM call nahi hai,
-        lekin flow conceptually wahi hai.
-        """
+    def _build_prompt(self, query: str, search_results: List[Dict[str, Any]]) -> str:
+        context_lines = []
+        for item in search_results:
+            chunk = item["chunk"]
+            context_lines.append(chunk["text"])
+
+        context_block = "\n".join(context_lines) if context_lines else "No relevant telemetry context found."
+        return (
+            "You are an AWS Serverless Observability expert. Use the retrieved telemetry context below to answer the user's question. "
+            "Be concise and factual. If the context is weak, say that you could not find enough evidence.\n\n"
+            f"Question: {query}\n\n"
+            f"Retrieved context:\n{context_block}\n\n"
+            "Answer:"
+        )
+
+    def _fallback_response(self, query: str, search_results: List[Dict[str, Any]]) -> Dict[str, Any]:
         retrieved_sources = []
-
         for item in search_results:
             chunk = item["chunk"]
             metadata = chunk["metadata"]
-
             source_label = f"{metadata.get('source', 'DB Record')} ({metadata.get('function_name', 'Global')})"
             retrieved_sources.append({
                 "source": source_label,
@@ -33,7 +73,6 @@ class RagGenerator:
 
         query_lower = query.lower()
 
-        # Agar koi match nahi mila to fallback answer de diya jata hai.
         if not search_results or search_results[0]["score"] == 0:
             answer = (
                 f"I searched the telemetry database for **'{query}'**, but could not find specific matching records.\n\n"
@@ -44,7 +83,6 @@ class RagGenerator:
             top_text = search_results[0]["chunk"]["text"]
             fn_name = search_results[0]["chunk"]["metadata"].get("function_name", "your serverless stack")
 
-            # Query keyword ke hisaab se different response style choose hoti hai.
             if "duration" in query_lower or "slow" in query_lower or "latency" in query_lower:
                 answer = (
                     f"Based on retrieved CloudWatch metrics, **{fn_name}** exhibits key latency records:\n\n"
@@ -78,5 +116,35 @@ class RagGenerator:
             "query": query,
             "answer": answer,
             "retrieved_context": retrieved_sources,
-            "confidence_score": confidence
+            "confidence_score": confidence,
         }
+
+    def generate_response(self, query: str, search_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Try a real LLM response first, then fall back to the heuristic answer."""
+        retrieved_sources = []
+        for item in search_results:
+            chunk = item["chunk"]
+            metadata = chunk["metadata"]
+            source_label = f"{metadata.get('source', 'DB Record')} ({metadata.get('function_name', 'Global')})"
+            retrieved_sources.append({
+                "source": source_label,
+                "item": chunk["text"]
+            })
+
+        if search_results:
+            try:
+                prompt = self._build_prompt(query, search_results)
+                llm_answer = self.ollama_client.generate(prompt)
+                if llm_answer:
+                    return {
+                        "query": query,
+                        "answer": llm_answer,
+                        "retrieved_context": retrieved_sources,
+                        "confidence_score": "95%",
+                    }
+            except (error.URLError, error.HTTPError, TimeoutError, ConnectionError, ValueError, OSError):
+                pass
+
+        fallback = self._fallback_response(query, search_results)
+        fallback["retrieved_context"] = retrieved_sources
+        return fallback

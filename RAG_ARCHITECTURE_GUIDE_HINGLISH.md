@@ -1,6 +1,6 @@
 # 🧠 RAG Architecture Guide (Hinglish)
 
-Yeh document current implemented RAG system ka real flow explain karta hai. Is project mein RAG ka kaam sirf backend mein ho raha hai aur ye PostgreSQL se telemetry data leke, usko chunks mein tod ke, embeddings banake, aur phir user query ke hisaab se relevant context retrieve karke answer generate karta hai.
+Yeh document current implemented RAG system ka real flow explain karta hai. Is project mein RAG backend ke andar kaam karta hai aur PostgreSQL se telemetry data lekar, usko chunks mein tod ke, embeddings banake, aur phir user query ke hisaab se relevant context retrieve karke answer generate karta hai.
 
 ---
 
@@ -47,17 +47,32 @@ Agar index abhi build nahi hua hai, to service DB se data nikal kar chunks banat
 - CloudWatch log event
 
 ### E. Embedding
-[TextEmbedder](backend/app/rag/embedder.py) har chunk ka vector banata hai. Current implementation simple bag-of-words based hai, matlab words ko count karke normalized vector banaya jata hai.
+[TextEmbedder](backend/app/rag/embedder.py) har chunk ka vector banata hai. Current implementation simple bag-of-words based hai.
 
 ### F. Vector search
 [VectorStore](backend/app/rag/vector_store.py) in-memory index maintain karta hai aur cosine similarity se top-k results nikalta hai.
 
 ### G. Response generation
-[RagGenerator](backend/app/rag/generator.py) retrieved chunks ko lekar answer build karta hai. Yeh actual LLM API call nahi karta, balki context-based structured answer return karta hai.
+[RagGenerator](backend/app/rag/generator.py) retrieved chunks ko lekar answer build karta hai. Yeh abhi actual local LLM path bhi support karta hai via Ollama, aur agar model available nahi ho to fallback response deta hai.
 
 ---
 
-## 3. File-wise responsibility
+## 3. Is session mein kya implement kiya gaya?
+
+Is session mein yeh cheezein add ki gayi hain:
+- Real RAG answer generation path via local Ollama model
+- Default config for Ollama base URL aur model name
+- Fallback logic jab Ollama unavailable ho
+- Endpoint documentation aur local run steps
+- Generator tests for LLM aur fallback behavior
+
+### Current runtime behavior
+- Agar Ollama available hai aur model pulled hai, to response LLM-se generate hota hai.
+- Agar Ollama nahi chal raha ya model missing hai, to app heuristic fallback answer de deta hai.
+
+---
+
+## 4. File-wise responsibility
 
 ```text
 backend/app/
@@ -70,13 +85,13 @@ backend/app/
 │   └── rag_service.py  # RAG pipeline ka coordinator
 ├── api/
 │   └── rag.py          # FastAPI endpoints /rag/query aur /rag/reindex
-└── schemas/
-    └── rag.py          # Request/response models
+└── core/
+    └── config.py       # Ollama settings aur app config
 ```
 
 ---
 
-## 4. Data flow in simple form
+## 5. Data flow in simple form
 
 ```text
 PostgreSQL DB
@@ -102,9 +117,7 @@ Final answer + retrieved context
 
 ---
 
-## 5. Kaise updates hote hain?
-
-Yeh important point hai:
+## 6. Kaise updates hote hain?
 
 ### Current behavior
 - Database mein data update ho jaye to RAG index automatically refresh nahi hota.
@@ -122,17 +135,6 @@ Isse service phir se:
 ### Practical rule
 - Agar new telemetry data aa gaya hai to /rag/reindex call karo
 - Agar server restart ho jaye to index phir se build hoga jab pehli query aayegi
-
----
-
-## 6. Current implementation ki limitations
-
-Yeh implementation lightweight aur demo-friendly hai. Isme kuch cheezein simple tarike se ki gayi hain:
-- Embedding simple word-based vectorization hai, actual transformer embeddings nahi
-- Vector store in-memory hai, database/jar file mein persistent nahi hai
-- Response generator simple rule-based hai, actual LLM integration ke bina
-
-Iska matlab hai ke yeh project ka RAG foundation hai, production-grade semantic search nahi.
 
 ---
 
@@ -168,6 +170,7 @@ Agar RAG kaam nahi kar raha ho to ye check karo:
 - Database connect ho rahi hai ya nahi
 - ETL data imported hai ya nahi
 - /rag/reindex call kiya gaya hai ya nahi
+- Ollama server chal raha hai ya nahi
 - Query me relevant function name ya metric term use ho raha hai ya nahi
 
 ---
@@ -180,19 +183,10 @@ Is project mein RAG ka working simple aur understandable structure mein hai:
 - Vectors banana
 - Similarity search karna
 - Context-based answer banana
+- Agar available ho to real local LLM se answer banana
 
-Yeh flow future mein bada sakta hai, jaise:
+Yeh flow future mein aur improve ho sakta hai, jaise:
 - pgvector ya FAISS use karna
-- real LLM API integration
-- auto-refresh index
 - better semantic embeddings
-
----
-
-## 10. Important note for developers
-
-Agar koi naya developer is project mein aaye to uske liye yaad rakhna:
-- RAG ka data source PostgreSQL database hai
-- Index memory mein cached hai
-- Data update ke baad reindex zaroori hai
-- Current implementation lightweight hai, lekin flow sahi hai
+- auto-refresh index
+- production-grade model integration
