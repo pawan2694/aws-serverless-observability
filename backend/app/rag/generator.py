@@ -1,40 +1,39 @@
 """
-RAG Generator & Prompt Augmenter
+RAG Generator & Prompt Augmenter.
 
-Takes the user query and top-K retrieved ground-truth telemetry context chunks,
-augments the system prompt, and generates a context-backed response.
+Yeh module retrieved context ko lekar final answer form karta hai.
+Current implementation simple rule-based generator hai; isko baad mein real LLM API ke saath replace kiya ja sakta hai.
 """
 
 from typing import List, Dict, Any
 
 
 class RagGenerator:
-    """
-    Handles prompt construction and response generation.
-    """
+    """Retrieved context ke hisaab se structured answer generate karta hai."""
 
     def generate_response(self, query: str, search_results: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
-        Synthesizes top-K retrieved context chunks into an augmented response payload.
+        Top-k retrieved chunks ko lekar response payload banata hai.
+
+        Yeh step ko "prompt augmentation" kah sakte hain, kyunki answer ko retrieved data ke
+        saath enrich kiya jata hai. Is implementation mein actual LLM call nahi hai,
+        lekin flow conceptually wahi hai.
         """
         retrieved_sources = []
-        context_snippets = []
 
         for item in search_results:
             chunk = item["chunk"]
-            score = item["score"]
             metadata = chunk["metadata"]
-            
+
             source_label = f"{metadata.get('source', 'DB Record')} ({metadata.get('function_name', 'Global')})"
             retrieved_sources.append({
                 "source": source_label,
                 "item": chunk["text"]
             })
-            context_snippets.append(chunk["text"])
 
-        # Format answer based on query & retrieved context
         query_lower = query.lower()
-        
+
+        # Agar koi match nahi mila to fallback answer de diya jata hai.
         if not search_results or search_results[0]["score"] == 0:
             answer = (
                 f"I searched the telemetry database for **'{query}'**, but could not find specific matching records.\n\n"
@@ -45,6 +44,7 @@ class RagGenerator:
             top_text = search_results[0]["chunk"]["text"]
             fn_name = search_results[0]["chunk"]["metadata"].get("function_name", "your serverless stack")
 
+            # Query keyword ke hisaab se different response style choose hoti hai.
             if "duration" in query_lower or "slow" in query_lower or "latency" in query_lower:
                 answer = (
                     f"Based on retrieved CloudWatch metrics, **{fn_name}** exhibits key latency records:\n\n"

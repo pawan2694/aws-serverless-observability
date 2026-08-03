@@ -1,8 +1,8 @@
 """
-RAG Coordinator Service
+RAG Coordinator Service.
 
-Integrates chunker, vector store, and generator into a single unified service.
-Manages global vector index state across application requests.
+Yeh service chunker, vector store aur generator ko ek saath jod kar
+complete RAG pipeline ka coordinator ka kaam karta hai.
 """
 
 from typing import Dict, Any
@@ -12,7 +12,7 @@ from app.rag.chunker import TelemetryChunker
 from app.rag.vector_store import VectorStore
 from app.rag.generator import RagGenerator
 
-# Global Singleton VectorStore instance
+# Global singleton vector store: har request ke liye same index reuse ho.
 _global_vector_store = VectorStore()
 
 
@@ -25,14 +25,18 @@ class RagService:
 
     def ensure_indexed(self):
         """
-        Ensures the vector store index is populated from PostgreSQL DB.
+        Ensure karta hai ki vector index already build ho chuka ho.
+
+        Agar index abhi nahi hai to reindex kar diya jata hai.
         """
         if not self.vector_store.is_indexed:
             self.reindex()
 
     def reindex(self) -> int:
         """
-        Re-chunks database logs/metrics and rebuilds the vector store index.
+        DB se fresh data lekar chunks banata hai aur vector store ko rebuild karta hai.
+
+        Isko /rag/reindex endpoint ke through call kiya jata hai jab DB mein new data aaye.
         """
         chunker = TelemetryChunker(self.db)
         chunks = chunker.create_chunks()
@@ -41,16 +45,17 @@ class RagService:
 
     def process_query(self, query: str) -> Dict[str, Any]:
         """
-        Full RAG Pipeline Execution:
-        1. Ensures database telemetry is indexed in vector store.
-        2. Vector Similarity Search (Top-K=3 matching chunks).
-        3. Prompt Augmentation & Response Generation.
+        Full RAG pipeline execute karta hai.
+
+        1. Ensure index exists
+        2. Query ko vector search se match karna
+        3. Retrieved context ko generator ke saath combine karna
         """
         self.ensure_indexed()
 
-        # Step 1 & 2: Embed Query & Vector Search
+        # Step 1: Query ko vector search ke liye bhejna.
         search_results = self.vector_store.search(query, top_k=3)
 
-        # Step 3: Augment Prompt & Generate Response
+        # Step 2: Retrieved context ke basis par answer generate karna.
         result = self.generator.generate_response(query, search_results)
         return result

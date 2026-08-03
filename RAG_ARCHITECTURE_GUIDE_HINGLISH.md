@@ -1,147 +1,198 @@
-# 🧠 Full RAG (Retrieval-Augmented Generation) Architecture Guide (Hinglish)
+# 🧠 RAG Architecture Guide (Hinglish)
 
-Yeh document hamare **AWS Serverless Observability** project mein Backend RAG system ki complete, detailed, aur step-by-step working ko explain karta hai.
-
----
-
-## 📌 RAG Kya Hai Aur Kyun zaroori Hai?
-
-Jab koi user LLM (ChatGPT / Gemini) se poochhta hai:
-> *"Mere `send_message` Lambda function ki average latency kitni hai?"*
-
-Generative AI Models (LLMs) ke paas aapke private PostgreSQL database ya CloudWatch logs ka access nahi hota.
-Agar hum LLM ko direct poochhein, to woh guess karega ya galat answer dega (**Hallucination**).
-
-**RAG (Retrieval-Augmented Generation)** is problem ko solve karta hai 3 main steps mein:
-1. **Retrieval**: User ke question ke hisab se relevant database records / logs search karna.
-2. **Augmentation**: Un retrieved data chunks ko Prompt ke saath jodhna (inject karna).
-3. **Generation**: LLM se sachhe ground-truth context ke aadhar par accurate answer generate karwana.
+Yeh document current implemented RAG system ka real flow explain karta hai. Is project mein RAG ka kaam sirf backend mein ho raha hai aur ye PostgreSQL se telemetry data leke, usko chunks mein tod ke, embeddings banake, aur phir user query ke hisaab se relevant context retrieve karke answer generate karta hai.
 
 ---
 
-## 🏗 System Architecture Diagram
+## 1. RAG ka goal kya hai?
 
-```text
-[ User Interface (Frontend Search Bar) ]
-                   │
-                   ▼ (POST /rag/query)
-[ FastAPI Backend Router (app/api/rag.py) ]
-                   │
-                   ▼
-[ RAG Service (app/services/rag_service.py) ]
-                   │
-    ┌──────────────┴─────────────────────────┐
-    ▼                                        ▼
-1. Embed User Query               2. Top-K Vector Search
- (app/rag/embedder.py)            (app/rag/vector_store.py)
-    │                                        │
-    └──────────────┬─────────────────────────┘
-                   ▼
-   [ Retrieved Ground-Truth Chunks ]
-                   │
-                   ▼
-3. Prompt Augmentation & LLM Generation (app/rag/generator.py)
-                   │
-                   ▼
-   [ Final Answer + Retrieved Sources ]
+Agar user poochhe:
+> "send_message Lambda ka duration kaisa hai?"
+
+LLM direct answer de sakta hai, lekin woh sirf guess kar sakta hai. Isliye hum RAG use karte hain jisme hum:
+1. Database se real telemetry data fetch karte hain
+2. Us data ko chunks mein convert karte hain
+3. Har chunk ko vector mein convert karte hain
+4. User query ke liye sabse relevant chunks nikalte hain
+5. In chunks ko prompt ke saath jod kar grounded answer dete hain
+
+Isse hallucination kam hota hai aur answer real data par based hota hai.
+
+---
+
+## 2. Current implementation ka flow
+
+### A. Request aata hai
+User frontend ya API se query bhejta hai:
+- POST /rag/query
+
+Request body simple hota hai:
+```json
+{"query": "Which lambda function has high duration?"}
 ```
 
+### B. Service layer ka kaam
+[RAG service](backend/app/services/rag_service.py) request ko handle karta hai. Yeh:
+- vector index ensure karta hai
+- query ko search ke liye bhejta hai
+- generator ko result bhejta hai
+
+### C. Index build hota hai
+Agar index abhi build nahi hua hai, to service DB se data nikal kar chunks banata hai aur vector store ko populate karta hai.
+
+### D. Chunking
+[TelemetryChunker](backend/app/rag/chunker.py) DB tables se data lekar readable text chunks banata hai. Example:
+- Lambda configuration
+- CloudWatch metric
+- CloudWatch log event
+
+### E. Embedding
+[TextEmbedder](backend/app/rag/embedder.py) har chunk ka vector banata hai. Current implementation simple bag-of-words based hai, matlab words ko count karke normalized vector banaya jata hai.
+
+### F. Vector search
+[VectorStore](backend/app/rag/vector_store.py) in-memory index maintain karta hai aur cosine similarity se top-k results nikalta hai.
+
+### G. Response generation
+[RagGenerator](backend/app/rag/generator.py) retrieved chunks ko lekar answer build karta hai. Yeh actual LLM API call nahi karta, balki context-based structured answer return karta hai.
+
 ---
 
-## 🗂 Code Folder Structure & Key Files
-
-Backend mein RAG system completely modular aur systematic tarike se divided hai:
+## 3. File-wise responsibility
 
 ```text
 backend/app/
-├── rag/                           # 🧠 Dedicated RAG Engine Module
-│   ├── __init__.py
-│   ├── chunker.py                 # Text Chunking logic (Logs & Metrics split करना)
-│   ├── embedder.py                # Vector Embeddings generation (Text to Math Vectors)
-│   ├── vector_store.py            # Vector Storage & Cosine Similarity Search Engine
-│   └── generator.py               # Prompt Augmenter & LLM Response Generator
+├── rag/
+│   ├── chunker.py      # DB rows ko readable chunks mein convert karta hai
+│   ├── embedder.py     # Text ko vector mein convert karta hai
+│   ├── vector_store.py # In-memory vector index + similarity search
+│   └── generator.py    # Retrieved context se answer form karta hai
 ├── services/
-│   └── rag_service.py             # RAG Business Logic & Coordinator Service
+│   └── rag_service.py  # RAG pipeline ka coordinator
 ├── api/
-│   └── rag.py                     # FastAPI Endpoints (/rag/query, /rag/index)
+│   └── rag.py          # FastAPI endpoints /rag/query aur /rag/reindex
 └── schemas/
-    └── rag.py                     # Request/Response Pydantic Models
+    └── rag.py          # Request/response models
 ```
 
 ---
 
-## 🔍 Step-by-Step RAG Execution Pipeline Details
+## 4. Data flow in simple form
 
-### Step 1: Data Ingestion & Chunking (`app/rag/chunker.py`)
-- **Kyun zaroori hai?**: Raw logs aur metrics bahut bade hote hain. Pure document ko ek saath LLM ko nahi bheja ja sakta.
-- **Kaise kaam karta hai?**: 
-  - Hum PostgreSQL Database se `lambda_functions`, `cloudwatch_metrics`, aur `cloudwatch_logs` padhte hain.
-  - Chunking Engine in records ko fixed-size semantic text chunks mein break karta hai:
-    - **Chunk 1**: `Lambda Function: send_message | Memory: 1024MB | Timeout: 15s | Environment: Production`
-    - **Chunk 2**: `Metric: Duration | Lambda: send_message | Value: 47.98ms | Timestamp: 2026-07-21`
-    - **Chunk 3**: `Log: REPORT RequestId: 69cfff2d... | Duration: 47.98ms | Max Memory Used: 174MB`
-
-### Step 2: Vector Embedding Generation (`app/rag/embedder.py`)
-- **Kyun zaroori hai?**: Computers ko text samajhne ke liye text ko mathematical numbers (Vectors/Floating point arrays) mein convert karna padta hai.
-- **Kaise kaam karta hai?**:
-  - `TextEmbedder` class har text chunk ko ek **Vector Embedding** (e.g. 384-dimensional array like `[0.12, -0.45, 0.89, ...]`) mein convert karti hai.
-  - Text: `"high memory lambda function"` ➔ Vector: `[0.08, 0.91, -0.33, ...]`.
-  - In vectors se semantic meaning capture hoti hai (jaise "latency" aur "duration" dono pass-pass vectors honge).
-
-### Step 3: Vector Indexing & Similarity Search (`app/rag/vector_store.py`)
-- **Kyun zaroori hai?**: User ke query vector ke sabse paas wale (most similar) data chunks dhoondhna.
-- **Kaise kaam karta hai?**:
-  - `VectorStore` class sabhi chunks aur unke vectors ko memory/disk par index karti hai.
-  - Jab query aati hai, hum **Cosine Similarity** (Vector Mathematics) ka use karke top-$K$ ($K=3$ ya $5$) highest similarity score wale chunks select karte hain.
-
-$$\text{Similarity}(A, B) = \frac{A \cdot B}{\|A\| \|B\|}$$
-
-### Step 4: Prompt Augmentation & Generation (`app/rag/generator.py`)
-- **Kyun zaroori hai?**: Retrieved context ko system prompt ke saath append karke LLM se intelligent answer mangwana.
-- **Prompt Structure**:
 ```text
-System: You are an AWS Serverless Observability Expert. Use ONLY the following ground-truth retrieved context to answer the user's question.
-
-Retrieved Context:
-[Context 1]: Lambda send_message has avg duration 47.98ms.
-[Context 2]: Lambda read_market_data memory is 1024MB.
-
-User Question: Which function has high duration?
-Answer:
+PostgreSQL DB
+   ↓
+TelemetryChunker
+   ↓
+Text chunks + metadata
+   ↓
+TextEmbedder
+   ↓
+Vector embeddings
+   ↓
+VectorStore (in-memory index)
+   ↓
+User query
+   ↓
+Similarity search
+   ↓
+RagGenerator
+   ↓
+Final answer + retrieved context
 ```
 
 ---
 
-## ⚡ API Endpoints (`app/api/rag.py`)
+## 5. Kaise updates hote hain?
 
-1. **`POST /rag/query`**
-   - **Input**: `{"query": "Which lambda function is slowest?"}`
-   - **Output**:
-     ```json
-     {
-       "answer": "Based on retrieved metrics, send_message has the highest average duration of 47.98 ms.",
-       "retrieved_chunks": [
-         {
-           "source": "CloudWatch Metrics",
-           "text": "Lambda: send_message | Metric: Duration | Value: 47.98ms"
-         }
-       ],
-       "confidence_score": "98%"
-     }
-     ```
+Yeh important point hai:
 
-2. **`POST /rag/reindex`**
-   - Triggers re-chunking and re-embedding of PostgreSQL metrics into Vector Store.
+### Current behavior
+- Database mein data update ho jaye to RAG index automatically refresh nahi hota.
+- Index ek baar build ho jata hai aur service ke andar cached rehta hai.
+
+### Jab index refresh karna ho
+Aapko ye endpoint use karna hota hai:
+- POST /rag/reindex
+
+Isse service phir se:
+1. DB se data read karta hai
+2. Naye chunks banata hai
+3. Vector store ko rebuild karta hai
+
+### Practical rule
+- Agar new telemetry data aa gaya hai to /rag/reindex call karo
+- Agar server restart ho jaye to index phir se build hoga jab pehli query aayegi
 
 ---
 
-## 🎯 Summary Checklist
+## 6. Current implementation ki limitations
 
-- [x] Detailed Hinglish Guide created (`RAG_ARCHITECTURE_GUIDE_HINGLISH.md`).
-- [ ] Implement `app/rag/chunker.py`
-- [ ] Implement `app/rag/embedder.py`
-- [ ] Implement `app/rag/vector_store.py`
-- [ ] Implement `app/rag/generator.py`
-- [ ] Implement `app/services/rag_service.py`
-- [ ] Implement `app/api/rag.py` and register router in `main.py`
-- [ ] Update frontend `ragApi.js` to point to `/rag/query`
+Yeh implementation lightweight aur demo-friendly hai. Isme kuch cheezein simple tarike se ki gayi hain:
+- Embedding simple word-based vectorization hai, actual transformer embeddings nahi
+- Vector store in-memory hai, database/jar file mein persistent nahi hai
+- Response generator simple rule-based hai, actual LLM integration ke bina
+
+Iska matlab hai ke yeh project ka RAG foundation hai, production-grade semantic search nahi.
+
+---
+
+## 7. Example flow
+
+Example:
+1. User query: "Which function has high duration?"
+2. Query ko vector mein convert kiya jata hai
+3. Vector store top-3 similar chunks nikalta hai
+4. Generator un chunks ka use karke answer deta hai
+5. Response me retrieved context bhi bheja jata hai
+
+Example output:
+```json
+{
+  "query": "Which function has high duration?",
+  "answer": "Based on retrieved telemetry data, send_message shows important duration-related records.",
+  "retrieved_context": [
+    {
+      "source": "CloudWatch Metrics (send_message)",
+      "item": "CloudWatch Metric: Function='send_message'..."
+    }
+  ],
+  "confidence_score": "95%"
+}
+```
+
+---
+
+## 8. Debugging tips
+
+Agar RAG kaam nahi kar raha ho to ye check karo:
+- Database connect ho rahi hai ya nahi
+- ETL data imported hai ya nahi
+- /rag/reindex call kiya gaya hai ya nahi
+- Query me relevant function name ya metric term use ho raha hai ya nahi
+
+---
+
+## 9. Summary
+
+Is project mein RAG ka working simple aur understandable structure mein hai:
+- DB se telemetry data leke aana
+- Chunks banana
+- Vectors banana
+- Similarity search karna
+- Context-based answer banana
+
+Yeh flow future mein bada sakta hai, jaise:
+- pgvector ya FAISS use karna
+- real LLM API integration
+- auto-refresh index
+- better semantic embeddings
+
+---
+
+## 10. Important note for developers
+
+Agar koi naya developer is project mein aaye to uske liye yaad rakhna:
+- RAG ka data source PostgreSQL database hai
+- Index memory mein cached hai
+- Data update ke baad reindex zaroori hai
+- Current implementation lightweight hai, lekin flow sahi hai

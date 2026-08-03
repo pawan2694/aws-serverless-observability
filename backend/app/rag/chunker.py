@@ -1,9 +1,8 @@
 """
-RAG Text Chunker Module
+RAG Text Chunker Module.
 
-Extremely important component of the RAG pipeline.
-It extracts raw telemetry data from PostgreSQL database tables and transforms them
-into semantic, metadata-rich text chunks suitable for vector embedding and retrieval.
+Yeh module database se telemetry data leke readable text chunks mein convert karta hai.
+In chunks ko baad mein vector embeddings aur retrieval ke liye use kiya jata hai.
 """
 
 from typing import List, Dict, Any
@@ -16,19 +15,26 @@ from app.models.cloudwatch_log import CloudWatchLog
 
 class TelemetryChunker:
     """
-    Handles extracting database records and creating chunk objects.
-    Each chunk contains:
-    - text: The readable text describing the serverless event or metric.
-    - metadata: Key-value dictionary storing function name, metric name, source table, etc.
+    Database records ko chunk objects mein convert karta hai.
+
+    Har chunk ke paas:
+    - text: human-readable context
+    - metadata: function name, metric name, source type, etc.
     """
 
     def __init__(self, db: Session):
         self.db = db
 
     def create_chunks(self) -> List[Dict[str, Any]]:
+        """
+        RAG index ke liye chunks banana.
+
+        Current implementation lightweight hai aur demo-friendly hai.
+        Isliye hum sirf limited number of rows le rahe hain taaki local run fast ho.
+        """
         chunks = []
 
-        # --- 1. CHUNK LAMBDA FUNCTIONS ---
+        # 1. Lambda function config ko chunk banana.
         functions = self.db.query(LambdaFunction).all()
         for fn in functions:
             chunk_text = (
@@ -48,7 +54,8 @@ class TelemetryChunker:
                 }
             })
 
-        # --- 2. CHUNK CLOUDWATCH METRICS ---
+        # 2. CloudWatch metrics ko chunk banana.
+        # Limit use ki gayi hai taaki local runs fast rahein aur memory usage manageable ho.
         metrics = self.db.query(CloudWatchMetric).limit(300).all()
         for m in metrics:
             fn_name = m.lambda_function.function_name if m.lambda_function else "Unknown"
@@ -69,11 +76,11 @@ class TelemetryChunker:
                 }
             })
 
-        # --- 3. CHUNK CLOUDWATCH LOGS ---
+        # 3. CloudWatch logs ko chunk banana.
+        # Log messages ko clean karna zaroori hai taaki newline ya extra formatting na ho.
         logs = self.db.query(CloudWatchLog).limit(300).all()
         for log in logs:
             fn_name = log.lambda_function.function_name if log.lambda_function else "Unknown"
-            # Clean up newlines in log message
             msg_clean = (log.message or "").replace("\n", " ").strip()
             if not msg_clean:
                 continue

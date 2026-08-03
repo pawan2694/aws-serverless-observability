@@ -1,12 +1,11 @@
 """
-RAG Embedder & Vector Similarity Engine
+RAG Embedder & Vector Similarity Engine.
 
-Converts text strings into high-dimensional numerical vector representations.
-Implements Cosine Similarity math to measure semantic closeness between user queries
-and database chunks.
+Yeh module text ko numerical vectors mein convert karta hai.
+Current implementation simple bag-of-words approach use karta hai, matlab har word ki frequency
+count karke ek normalized vector banaya jata hai.
 
-Math Formula for Cosine Similarity:
-CosineSimilarity(A, B) = (A dot B) / (||A|| * ||B||)
+Cosine similarity ka use karke hum check karte hain ki query aur chunk kitne similar hain.
 """
 
 import math
@@ -16,23 +15,21 @@ from typing import List, Dict, Any
 
 class TextEmbedder:
     """
-    Computes vector embeddings and similarity scores for text strings.
-    Uses word-level frequency vectorization with normalization to generate dense vectors.
+    Text ko vector representation mein convert karta hai.
+
+    Is implementation mein vocabulary build ki jati hai aur phir har text ko
+    us vocabulary ke hisaab se numeric vector mein map kiya jata hai.
     """
 
     def __init__(self):
         self.vocabulary: Dict[str, int] = {}
 
     def _tokenize(self, text: str) -> List[str]:
-        """
-        Tokenizes text into lowercase alphanumeric words.
-        """
+        """Text ko lowercase alphanumeric tokens mein tod deta hai."""
         return re.findall(r'\w+', text.lower())
 
     def build_vocabulary(self, corpus: List[str]):
-        """
-        Builds a vocabulary mapping for all words in the document chunks corpus.
-        """
+        """Har chunk ke words se vocabulary build karta hai."""
         self.vocabulary = {}
         for doc in corpus:
             tokens = self._tokenize(doc)
@@ -41,21 +38,20 @@ class TextEmbedder:
                     self.vocabulary[token] = len(self.vocabulary)
 
     def embed_text(self, text: str) -> List[float]:
-        """
-        Converts a text string into a normalized numerical vector representation.
-        """
+        """Ek text ko normalized vector mein convert karta hai."""
         tokens = self._tokenize(text)
         vector = [0.0] * max(len(self.vocabulary), 1)
 
         if not self.vocabulary:
             return vector
 
+        # Har token ka count vector mein daala jata hai.
         for token in tokens:
             if token in self.vocabulary:
                 idx = self.vocabulary[token]
                 vector[idx] += 1.0
 
-        # L2 Vector Normalization
+        # L2 normalization se vector ko consistent banaya jata hai.
         magnitude = math.sqrt(sum(v * v for v in vector))
         if magnitude > 0:
             vector = [v / magnitude for v in vector]
@@ -65,8 +61,10 @@ class TextEmbedder:
     @staticmethod
     def cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:
         """
-        Calculates the Cosine Similarity metric between two normalized vector embeddings.
-        Returns a score between 0.0 (unrelated) and 1.0 (identical/highest similarity).
+        Do vectors ke beech cosine similarity calculate karta hai.
+
+        1.0 ka matlab bilkul same/strong match,
+        0.0 ka matlab unrelated.
         """
         if not vec_a or not vec_b or len(vec_a) != len(vec_b):
             return 0.0

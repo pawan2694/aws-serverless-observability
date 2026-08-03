@@ -20,6 +20,7 @@ def query_rag(
     payload: RagQueryRequest,
     db: Session = Depends(get_db)
 ):
+    """User query ko le kar full RAG pipeline run karta hai."""
     service = RagService(db)
     return service.process_query(payload.query)
 
@@ -32,6 +33,7 @@ def query_rag(
 def reindex_rag(
     db: Session = Depends(get_db)
 ):
+    """DB se fresh data lekar vector index ko rebuild karta hai."""
     service = RagService(db)
     total = service.reindex()
     return {
